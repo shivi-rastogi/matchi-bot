@@ -184,7 +184,28 @@ FIND_SLOT_JS = """
 
 async def login(page):
     log("Logging in...")
-    await page.goto("https://www.matchi.se/login")
+    await page.goto("https://www.matchi.se/login", wait_until="domcontentloaded")
+    user_box = page.locator("input[name='username']")
+    for attempt in range(6):                      # up to ~60s
+        if await user_box.count() and await user_box.first.is_visible():
+            break
+        # Cookie / consent banner?
+        for txt in ["Accept all", "Accept", "Godkänn alla", "Godkänn", "Acceptera alla", "Acceptera", "OK"]:
+            btn = page.get_by_role("button", name=txt, exact=True)
+            try:
+                if await btn.count() and await btn.first.is_visible():
+                    log(f"   clicking cookie button '{txt}'")
+                    await btn.first.click()
+                    break
+            except Exception:
+                pass
+        body = ""
+        try:
+            body = (await page.locator("body").inner_text())[:200].replace("\n", " ")
+        except Exception:
+            pass
+        log(f"   login form not visible yet (title='{await page.title()}', url={page.url}, text='{body}')")
+        await page.wait_for_timeout(10000)
     await page.fill("input[name='username']", USERNAME)
     await page.fill("input[name='password']", PASSWORD)
     await page.click("button[type='submit']")
@@ -321,8 +342,18 @@ async def run():
         f"until {deadline:%Y-%m-%d %H:%M}, DRY_RUN={DRY_RUN}")
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=HEADLESS)
-        context = await browser.new_context(viewport={"width": 1400, "height": 900}, locale="en-GB")
+        browser = await p.chromium.launch(
+            headless=HEADLESS,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context = await browser.new_context(
+            viewport={"width": 1400, "height": 900},
+            locale="en-GB",
+            timezone_id="Europe/Stockholm",
+            # Normal desktop Chrome identity - headless Chrome otherwise says "HeadlessChrome", which sites block
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36",
+        )
+        await context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         page = await context.new_page()
 
         try:
