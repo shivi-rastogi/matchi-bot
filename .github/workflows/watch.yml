@@ -31,7 +31,7 @@ jobs:
       WATCH: "1"
       CHECK_EVERY: "60"
       RUN_MINUTES: "9"          # each run checks for ~9 min, then the next run takes over
-      HEADLESS: "1"
+      HEADLESS: "0"               # real (virtual) window via xvfb - looks less like a bot
       NOTIFY_ERRORS: "0"
       STOP_FLAG: stop.flag
       DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
@@ -48,7 +48,7 @@ jobs:
           python -m playwright install --with-deps chromium
 
       - name: Check MATCHi and book if free
-        run: python booker.py
+        run: xvfb-run -a python booker.py
 
       - name: Switch watcher off once booked (or too late)
         if: always() && hashFiles('stop.flag') != '' && env.DRY_RUN != '1'
