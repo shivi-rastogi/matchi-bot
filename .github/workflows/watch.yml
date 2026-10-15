@@ -1,0 +1,68 @@
+name: MATCHi badminton watcher
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"     # start a run every ~10 min (GitHub may delay a few minutes)
+  workflow_dispatch:            # lets you press "Run workflow" by hand
+    inputs:
+      dry_run:
+        description: "1 = test only, stop before paying"
+        default: "1"
+
+permissions:
+  actions: write                # needed to switch this workflow off after booking
+  contents: read
+
+concurrency:
+  group: matchi-watcher         # never two runs at the same time -> never two bookings
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Europe/Stockholm      # so 18:00 means Swedish time
+      MATCHI_USER: ${{ secrets.MATCHI_USER }}
+      MATCHI_PASS: ${{ secrets.MATCHI_PASS }}
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      TARGET_DATE: "2026-10-23"
+      TARGET_TIME: "18:00"
+      WATCH: "1"
+      CHECK_EVERY: "60"
+      RUN_MINUTES: "9"          # each run checks for ~9 min, then the next run takes over
+      HEADLESS: "1"
+      NOTIFY_ERRORS: "0"
+      STOP_FLAG: stop.flag
+      DRY_RUN: ${{ github.event.inputs.dry_run || '0' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Check MATCHi and book if free
+        run: python booker.py
+
+      - name: Switch watcher off once booked (or too late)
+        if: always() && hashFiles('stop.flag') != '' && env.DRY_RUN != '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow disable "${{ github.workflow }}" --repo "${{ github.repository }}"
+
+      - name: Save screenshots and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-${{ github.run_number }}
+          path: |
+            debug_*.png
+            booker.log
+          if-no-files-found: ignore
+          retention-days: 3
